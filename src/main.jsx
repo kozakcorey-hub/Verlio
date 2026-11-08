@@ -56,6 +56,7 @@ function App(){
  const [managedBook,setManagedBook]=useState(null);
  const [wordFilter,setWordFilter]=useState(''),[wordModalOpen,setWordModalOpen]=useState(false);
  const [annualGoal,setAnnualGoal]=useState(0),[goalDraft,setGoalDraft]=useState('30'),[goalEditor,setGoalEditor]=useState(false);
+ const uid=session?.user?.id;
  const currentYear=new Date().getFullYear();
  const finishedThisYear=books.filter(b=>b.status==='Finished'&&Number(b.finished_year||String(b.finished_date||'').slice(0,4))===currentYear).length;
  const goalPercent=annualGoal>0?Math.min(100,Math.round(finishedThisYear/annualGoal*100)):0;
@@ -142,7 +143,6 @@ function App(){
    setFriendResult(null);
   }
  },[tab]);
- const uid=session?.user?.id;
  const preferenceSignature=books.filter(b=>b.status==='Finished'||b.status==='Want to Read').map(b=>`${b.status}:${b.google_id||b.title}:${b.author||''}`).sort().join('|');
  useEffect(()=>{const id=setInterval(()=>setRecoTick(x=>x+1),60000);const onFocus=()=>setRecoTick(x=>x+1);window.addEventListener('focus',onFocus);return()=>{clearInterval(id);window.removeEventListener('focus',onFocus)}},[]);
  useEffect(()=>{
