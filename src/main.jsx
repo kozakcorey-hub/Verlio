@@ -1,6 +1,6 @@
 import React, {useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {BookOpen, BookA, LibraryBig, UsersRound, UserRound, Menu, Volume2, Bookmark, Plus, Search, Sparkles, BookOpenCheck, CheckCircle2, CalendarDays, ArrowRight, RotateCcw, Brain, ChevronRight, X, Headphones, Trophy, ChevronDown, ChevronLeft, ChevronRight, CircleX, Target, Ellipsis, Flame} from 'lucide-react';
+import {BookOpen, BookA, LibraryBig, UsersRound, UserRound, Menu, Volume2, Bookmark, Plus, Search, Sparkles, BookOpenCheck, CheckCircle2, CalendarDays, ArrowRight, RotateCcw, Brain, X, Headphones, Trophy, ChevronDown, ChevronLeft, ChevronRight, CircleX, Target, Ellipsis, Flame} from 'lucide-react';
 import {supabase} from './supabase';
 import './style.css';
 const statuses=['Want to Read','Reading','Finished'];
