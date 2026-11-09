@@ -305,3 +305,33 @@ body{line-height:1.5}
 @media(max-width:700px){.guest-grid{grid-template-columns:1fr}.guest-header{padding:14px}.guest-brand{font-size:20px}.guest-content{padding:0 14px}.guest-header button{font-size:12px}}
 
 .recommendations-panel .recommendation-cover,.library-recommendations .recommendation-cover{height:auto!important;min-height:0!important;align-self:flex-start}
+
+/* Verlio 2.5 — tighter, consistent page rhythm and balanced dashboard cards */
+.app-topbar{padding-top:16px!important;padding-bottom:0!important}
+.dashboard-container{margin-top:0!important;padding-top:0!important}
+.app-topbar .topbar-title{margin-bottom:0!important}
+.dashboard-top{margin-top:12px!important}
+.dashboard-main{grid-template-columns:minmax(0,2fr) minmax(0,3fr)!important;align-items:start!important}
+.dashboard-main .library-overview{align-self:start!important;height:auto!important;min-height:0!important;padding-bottom:18px!important}
+.library-overview .section-heading{margin-bottom:14px!important}
+.library-overview .library-stats{gap:10px!important}
+.library-overview .stat-tile{padding:12px 9px!important;gap:9px!important}
+.library-overview .stat-tile>span{width:36px!important;height:36px!important}
+.library-overview .stat-tile small{font-size:11px!important}
+.library-overview .stat-tile strong{font-size:23px!important}
+.dashboard-main .reading-now{align-self:start!important;height:auto!important;min-height:0!important}
+.reading-now .reading-book{gap:10px!important;padding:12px 0!important;min-width:0}
+.reading-now .reading-book img{width:60px!important;height:91px!important;flex:none}
+.reading-now .reading-book strong{font-size:13px!important;line-height:1.35!important}
+.reading-now .reading-book small{font-size:11px!important}
+.reading-now .reading-book span{gap:5px!important;min-width:0}
+.vocab-list .vocab-heading{margin-bottom:12px!important}
+.vocab-list .word-quick-add{margin-bottom:16px!important}
+.vocab-list .word-quick-add>.search-field-wrap{display:flex;align-items:center;gap:9px;border:1px solid #d9e0ea;border-radius:10px;padding:0 12px;isolation:auto}
+.vocab-list .word-quick-add>.search-field-wrap>svg{flex:none;color:#40557a}
+.vocab-list .word-quick-add>.search-field-wrap>input{border:0!important;outline:0!important;box-shadow:none!important;background:transparent!important;padding:13px 4px!important;flex:1;min-width:0}
+.vocab-list .word-quick-add .input-clear{position:static!important;flex:none}
+.vocab-list .word-quick-suggestions{position:relative;z-index:5}
+@media(max-width:1000px){.dashboard-main{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}}
+@media(max-width:850px){.dashboard-main{grid-template-columns:1fr!important}.dashboard-main .library-overview,.dashboard-main .reading-now{grid-column:1!important;grid-row:auto!important}}
+@media(max-width:750px){.app-topbar{padding-top:12px!important}.dashboard-top{margin-top:8px!important}}
