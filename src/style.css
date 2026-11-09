@@ -335,3 +335,10 @@ body{line-height:1.5}
 @media(max-width:1000px){.dashboard-main{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}}
 @media(max-width:850px){.dashboard-main{grid-template-columns:1fr!important}.dashboard-main .library-overview,.dashboard-main .reading-now{grid-column:1!important;grid-row:auto!important}}
 @media(max-width:750px){.app-topbar{padding-top:12px!important}.dashboard-top{margin-top:8px!important}}
+
+/* Verlio 2.5.2: remove vertical auto margins on flex child header (root cause of large blank gap). */
+.app-content > .app-topbar{margin:0 auto!important;flex:0 0 auto!important;padding-top:16px!important;padding-bottom:8px!important}
+.app-content > .dashboard-container{margin:0 auto!important;padding-top:0!important;flex:0 0 auto!important}
+.dashboard-top{margin-top:12px!important}
+.dashboard-main .library-overview,.dashboard-main .reading-now{align-self:start!important}
+@media(max-width:750px){.app-content > .app-topbar{padding-top:12px!important;padding-bottom:6px!important}.dashboard-top{margin-top:8px!important}}
