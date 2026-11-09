@@ -14,19 +14,58 @@ async function fetchWithTimeout(url, options={}, timeoutMs=5000){
  try{return await fetch(url,{...options,signal:controller.signal})}
  finally{clearTimeout(timer);external?.removeEventListener('abort',abort)}
 }
-// Google Books is a secondary, keyless public search provider when Open Library fails.
-async function googleBookSearch(term, limit=24, signal){
- const params=new URLSearchParams({q:term,maxResults:String(Math.min(limit,40)),printType:'books'});
- const response=await fetchWithTimeout(`https://www.googleapis.com/books/v1/volumes?${params}`,{signal},6500);
- if(!response.ok)throw new Error(`Google Books HTTP ${response.status}`);
- const data=await response.json();
- return (data.items||[]).filter(b=>b.volumeInfo?.title).map(b=>{
-  const v=b.volumeInfo;
-  return {google_id:b.id, title:v.title,author:(v.authors||[]).slice(0,3).join(', ')||'Unknown author',
-   cover_url:(v.imageLinks?.thumbnail||v.imageLinks?.smallThumbnail||'').replace(/^http:/,'https:'),
-   description:v.description||'',published:v.publishedDate||''};
+// Shared provider protection: cache searches, deduplicate concurrent calls and honor 429 cooldowns.
+const bookRequestCache=new Map();
+const bookRequestPending=new Map();
+const bookProviderCooldown=new Map();
+const BOOK_CACHE_MS=24*60*60*1000;
+function cachedBookResults(key){
+ const inMemory=bookRequestCache.get(key);
+ if(inMemory&&Date.now()-inMemory.time<BOOK_CACHE_MS)return inMemory.data;
+ try{const saved=JSON.parse(localStorage.getItem('verlio:book-search:'+key)||'null');
+  if(saved&&Date.now()-saved.time<BOOK_CACHE_MS){bookRequestCache.set(key,saved);return saved.data}}
+ catch{}
+ return null;
+}
+function providerAvailable(provider){return Date.now()>=(bookProviderCooldown.get(provider)||0)}
+async function protectedBookRequest(provider,key,run){
+ const cached=cachedBookResults(key);if(cached!==null)return cached;
+ if(bookRequestPending.has(key))return bookRequestPending.get(key);
+ if(!providerAvailable(provider))throw new Error(provider+' temporarily rate-limited');
+ const task=(async()=>{try{
+  const data=await run();const item={time:Date.now(),data};bookRequestCache.set(key,item);
+  try{localStorage.setItem('verlio:book-search:'+key,JSON.stringify(item))}catch{}
+  return data;
+ }catch(error){if(error?.status===429)bookProviderCooldown.set(provider,Date.now()+15*60*1000);throw error}
+ finally{bookRequestPending.delete(key)}})();
+ bookRequestPending.set(key,task);return task;
+}
+async function openLibraryBookSearch(term,limit=32){
+ const normalized=term.trim().toLowerCase();const key='ol:'+normalized+':'+limit;
+ return protectedBookRequest('openlibrary',key,async()=>{
+  const params=new URLSearchParams({q:term,limit:String(limit),fields:'key,title,author_name,cover_i,first_publish_year,edition_count'});
+  const res=await fetchWithTimeout(`https://openlibrary.org/search.json?${params}`,{},5500);
+  if(!res.ok){const e=new Error('Open Library HTTP '+res.status);e.status=res.status;throw e}
+  const data=await res.json();return rankBooks(data.docs||[],term).map(b=>({google_id:'openlibrary:'+b.key,work_key:b.key,title:b.title,author:(b.author_name||[]).slice(0,3).join(', ')||'Unknown author',cover_url:b.cover_i?`https://covers.openlibrary.org/b/id/${b.cover_i}-M.jpg`:'',published:b.first_publish_year||''}));
  });
 }
+// Google Books is a secondary, keyless public search provider when Open Library fails.
+async function googleBookSearch(term, limit=24){
+ const normalized=term.trim().toLowerCase();
+ return protectedBookRequest('google',`google:${normalized}:${limit}`,async()=>{
+  const params=new URLSearchParams({q:term,maxResults:String(Math.min(limit,40)),printType:'books'});
+  const response=await fetchWithTimeout(`https://www.googleapis.com/books/v1/volumes?${params}`,{},6500);
+  if(!response.ok){const error=new Error(`Google Books HTTP ${response.status}`);error.status=response.status;throw error}
+  const data=await response.json();
+  return (data.items||[]).filter(b=>b.volumeInfo?.title).map(b=>{
+   const v=b.volumeInfo;
+   return {google_id:b.id,title:v.title,author:(v.authors||[]).slice(0,3).join(', ')||'Unknown author',
+    cover_url:(v.imageLinks?.thumbnail||v.imageLinks?.smallThumbnail||'').replace(/^http:/,'https:'),
+    description:v.description||'',published:v.publishedDate||''};
+  });
+ });
+}
+
 const statuses=['Want to Read','Reading','Finished'];
 const featuredBooks=[
  {key:'OL17930368M',title:'Atomic Habits',author:'James Clear',cover: 'https://covers.openlibrary.org/b/isbn/9780735211292-L.jpg',isbn:'9780735211292'},
@@ -188,14 +227,14 @@ function App(){
   const now=Date.now();
   let cache=null;try{cache=JSON.parse(localStorage.getItem(cacheKey)||'null')}catch{}
   if(cache?.signature===signature&&Array.isArray(cache.items)&&cache.items.length&&now-cache.timestamp<12*60*60*1000){setRecommendations(cache.items);setRecoBusy(false);return}
-  if(cache?.items?.length)setRecommendations(cache.items);
+  if(cache?.items?.length){setRecommendations(cache.items);setRecoBusy(false);return}
   async function recommend(){
    setRecoBusy(true);setRecoError('');
    try{
     // Each Finished and Want to Read title has equal weight. Prefer specific Open Library subjects and author similarities.
     const ordered=[...seeds].sort((a,b)=>String(a.google_id||a.title).localeCompare(String(b.google_id||b.title)));
     const offsetSeed=Math.floor(now/(12*60*60*1000))%ordered.length;
-    const rotated=ordered.slice(offsetSeed).concat(ordered.slice(0,offsetSeed)).slice(0,12);
+    const rotated=ordered.slice(offsetSeed).concat(ordered.slice(0,offsetSeed)).slice(0,3);
     const perSeed=await Promise.all(rotated.map(async book=>{
      const raw=(book.google_id||'').replace(/^openlibrary:/,'');
      let path=raw.startsWith('/works/')?raw:raw.startsWith('OL')?`/works/${raw}`:null;
@@ -208,9 +247,9 @@ function App(){
     const subjectCounts=new Map();perSeed.forEach(({subjects})=>[...new Set(subjects.map(x=>x.toLowerCase()))].forEach(x=>subjectCounts.set(x,(subjectCounts.get(x)||0)+1)));
     const subjectTerms=[...subjectCounts].sort((a,b)=>b[1]-a[1]).slice(0,7).map(([name])=>name);
     const authors=[...new Set(ordered.map(b=>(b.author||'').split(',')[0].trim()).filter(x=>x&&x!=='Unknown author'))].slice(0,5);
-    const searches=[...subjectTerms.map(x=>({subject:x})),...authors.map(x=>({author:x}))].slice(0,12);
+    const searches=[...subjectTerms.map(x=>({subject:x})),...authors.map(x=>({author:x}))].slice(0,3);
     if(!searches.length)searches.push(...ordered.slice(0,4).map(b=>({q:b.title})));
-    const lists=await Promise.all(searches.map(async params=>{try{const q=new URLSearchParams({...params,limit:'45',fields:'key,title,author_name,cover_i,first_publish_year,edition_count,subject'});const r=await fetchWithTimeout(`https://openlibrary.org/search.json?${q}`,{},4000);return r.ok?(await r.json()).docs||[]:[]}catch{return []}}));
+    const lists=await Promise.all(searches.map(async params=>{try{const q=new URLSearchParams({...params,limit:'18',fields:'key,title,author_name,cover_i,first_publish_year,edition_count,subject'});const r=await fetchWithTimeout(`https://openlibrary.org/search.json?${q}`,{},4000);return r.ok?(await r.json()).docs||[]:[]}catch{return []}}));
     const owned=new Set(books.map(b=>normalizeTitle(b.title)));
     const scored=new Map();
     lists.forEach((docs,idx)=>docs.forEach((b,pos)=>{
@@ -226,7 +265,7 @@ function App(){
     let candidates=[...scored.values()].sort((a,b)=>b.score-a.score);
     if(!candidates.length){
      const fallbackTerms=[...new Set(ordered.map(b=>b.author).filter(Boolean))].slice(0,3);
-     const lists=await Promise.all(fallbackTerms.map(async author=>{try{return await googleBookSearch(`inauthor:${author}`,16)}catch{return []}}));
+     const lists=[]; // Do not fan out Google Books calls when Open Library is unavailable.
      const ownedTitles=new Set(books.map(b=>normalizeTitle(b.title)));
      const seen=new Set();
      candidates=lists.flat().filter(b=>{const key=normalizeTitle(b.title);if(!key||ownedTitles.has(key)||seen.has(key)||junkTitle.test(b.title)||!b.cover_url)return false;seen.add(key);return true}).map(b=>({...b,score:1}));
@@ -244,24 +283,20 @@ function App(){
  },[uid,preferenceSignature,Math.floor(Date.now()/(12*60*60*1000)),recoTick&&Math.floor(Date.now()/(12*60*60*1000))]);
  useEffect(()=>{
   const term=query.trim();
-  if(tab!=='Books'||term.length<2){setBookSuggestions([]);setBookSuggestStatus('');return}
-  const controller=new AbortController();
-  setBookSuggestStatus('Searching…');
+  if(tab!=='Books'||term.length<3){setBookSuggestions([]);setBookSuggestStatus('');return}
+  let cancelled=false;
+  setBookSuggestStatus('');
   const id=setTimeout(async()=>{
+   setBookSuggestStatus('Searching…');
    try{
-    let suggestions=[];
-    try{
-     const params=new URLSearchParams({q:term,limit:'20',fields:'key,title,author_name,cover_i,first_publish_year'});
-     const response=await fetchWithTimeout(`https://openlibrary.org/search.json?${params}`,{signal:controller.signal},3500);
-     if(!response.ok)throw new Error('Open Library unavailable');
-     const data=await response.json();
-     suggestions=rankBooks(data.docs||[],term).slice(0,3).map(b=>({google_id:'openlibrary:'+b.key,work_key:b.key,title:b.title,author:(b.author_name||[])[0]||'Unknown author',cover_url:b.cover_i?`https://covers.openlibrary.org/b/id/${b.cover_i}-S.jpg`:'',published:b.first_publish_year}));
-    }catch(error){if(controller.signal.aborted)return;suggestions=(await googleBookSearch(term,8,controller.signal)).slice(0,3)}
-    if(controller.signal.aborted)return;
+    const suggestions=(await openLibraryBookSearch(term,12)).slice(0,3);
+    if(cancelled)return;
     setBookSuggestions(suggestions);setBookSuggestStatus(suggestions.length?'':'No matching books found.');
-   }catch{if(!controller.signal.aborted){setBookSuggestions([]);setBookSuggestStatus('Book suggestions unavailable. You can try searching again.')}}
-  },400);
-  return()=>{clearTimeout(id);controller.abort()};
+   }catch{
+    if(!cancelled){setBookSuggestions([]);setBookSuggestStatus('Suggestions unavailable. Use Search books to retry.');}
+   }
+  },650);
+  return()=>{cancelled=true;clearTimeout(id)};
  },[query,tab]);
  useEffect(()=>{
   const term=wordInput.word.trim();if(tab!=='Words'||term.length<2||!wordSuggestOpen){setWordSuggestions([]);return}
@@ -293,20 +328,16 @@ function App(){
   const term=query.trim();
   if(!term)return;
   const searchVersion=++bookSearchVersion.current;
+  setBookSuggestOpen(false);
   setBusy(true);setMessage('');setResults([]);
   try{
    let matches=[];
-   try{
-    const params=new URLSearchParams({q:term,limit:'50',fields:'key,title,author_name,cover_i,first_publish_year,edition_count'});
-    const res=await fetchWithTimeout(`https://openlibrary.org/search.json?${params}`,{},4200);
-    if(!res.ok)throw new Error(`Open Library HTTP ${res.status}`);
-    const data=await res.json();
-    matches=rankBooks(data.docs||[],term).map(b=>({google_id:`openlibrary:${b.key}`,work_key:b.key,title:b.title,author:(b.author_name||[]).slice(0,3).join(', ')||'Unknown author',cover_url:b.cover_i?`https://covers.openlibrary.org/b/id/${b.cover_i}-M.jpg`:'',description:b.first_publish_year?`First published ${b.first_publish_year}`:'',published:b.first_publish_year||''}));
-   }catch{matches=await googleBookSearch(term,32)}
+   try{matches=await openLibraryBookSearch(term,32)}
+   catch{matches=await googleBookSearch(term,24)}
    if(searchVersion!==bookSearchVersion.current)return;
    setResults(matches);
    if(!matches.length)setMessage('No matching books found. Try a different title or author.');
-  }catch(err){if(searchVersion!==bookSearchVersion.current)return;setMessage('Book providers are temporarily unavailable. Please try again shortly.');}
+  }catch(err){if(searchVersion!==bookSearchVersion.current)return;setMessage('Book providers are busy or rate-limited. Please wait before retrying.');}
   finally{if(searchVersion===bookSearchVersion.current)setBusy(false)}
  }
  async function openBookDetail(book){setBookDetail({...book,summary:''});setBookDetailBusy(true);try{if(book.work_key){const response=await fetch(`https://openlibrary.org${book.work_key}.json`);if(response.ok){const data=await response.json();const summary=typeof data.description==='string'?data.description:data.description?.value||'';setBookDetail(prev=>prev?.google_id===book.google_id?{...prev,summary}:prev)}}}catch{}finally{setBookDetailBusy(false)}}
